@@ -52,6 +52,8 @@ export interface SupplementalPhotoRequest {
 export type ParameterSource =
   | "valutazione_visiva"
   | "misurazione_utente"
+  | "media_cultivar"
+  | "modello_statistico"
   | "non_rilevabile";
 
 export type OliveSizeCategory = "piccola" | "media" | "grande";

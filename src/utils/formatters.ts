@@ -99,15 +99,24 @@ export function getPhotoQualityLabel(
   }
 }
 
-export function getParameterSourceLabel(source?: ParameterSource): string {
+export function getParameterSourceLabel(
+  source?: ParameterSource,
+  isSimulated?: boolean
+): string {
   switch (source) {
     case "misurazione_utente":
-      return "Misurazione / dato utente";
+      return "Misurazione dell'utente";
+    case "media_cultivar":
+      return "Valore medio della cultivar";
+    case "modello_statistico":
+      return "Ipotesi del modello statistico";
     case "non_rilevabile":
-      return "Non rilevabile da foto";
+      return "Non rilevabile da foto (usata media cultivar)";
     case "valutazione_visiva":
     default:
-      return "Valutazione visiva AI";
+      return isSimulated
+        ? "Stima visiva simulata (offline)"
+        : "Valutazione fotografica Gemini";
   }
 }
 

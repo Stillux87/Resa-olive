@@ -18,18 +18,29 @@ function clamp(n: number, min: number, max: number): number {
 }
 
 export function isDemoAnalysis(record: OliveAnalysisRecord): boolean {
-  return record.isDemo === true || record.dataOrigin === "simulato_demo";
+  return (
+    record.isDemo === true ||
+    record.dataOrigin === "simulato_demo" ||
+    record.id.startsWith("demo_")
+  );
 }
 
 /**
  * Computes conservative empirical calibration from REAL verified mill outcomes only.
- * Demo/simulated records are strictly excluded.
+ * Demo/simulated records and unverified real samples without mill outcomes are strictly excluded.
  */
 export function buildCalibrationSummary(
   allRecords: OliveAnalysisRecord[]
 ): CalibrationSummary {
   const realVerified = allRecords.filter(
-    (r) => !isDemoAnalysis(r) && Boolean(r.prediction) && Boolean(r.millOutcome)
+    (r) =>
+      !isDemoAnalysis(r) &&
+      r.status === "verificata_frantoio" &&
+      Boolean(r.prediction) &&
+      Boolean(r.millOutcome) &&
+      r.millOutcome!.actualYieldPct > 0 &&
+      r.millOutcome!.lotWeightKg > 0 &&
+      r.millOutcome!.actualOilKg > 0
   );
 
   const errorHistory: CalibrationErrorRecord[] = realVerified

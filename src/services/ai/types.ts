@@ -44,6 +44,13 @@ export interface MultimodalAnalysisProvider {
 export interface BackendHealthStatus {
   status: "ok" | "offline";
   geminiConfigured: boolean;
+  geminiOperational?: boolean;
+  primaryModel?: string;
+  fallbackModel?: string;
+  activeModel?: string | null;
+  fallbackUsed?: boolean;
+  errorMessage?: string;
+  verifiedAt?: string;
   timestamp?: string;
 }
 

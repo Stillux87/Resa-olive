@@ -168,12 +168,32 @@ export function computeYieldPrediction(
       : 1.04 - Math.min(0.03, (f.veraisonIndex - 3.6) * 0.015);
 
   // 2. Pulp-to-pit ratio impact (oil resides almost exclusively in mesocarp pulp)
-  const effectivePulpToPit =
-    sd.measuredPulpToPit ?? f.pulpToPitEstimate ?? baseline.typicalPulpToPit;
-  const pulpRatioMeasured = sd.measuredPulpToPit !== undefined;
+  // CRITICAL: 0 or non-observable values MUST NEVER be treated as a real pulp/pit ratio.
+  const hasManualPulp =
+    typeof sd.measuredPulpToPit === "number" &&
+    Number.isFinite(sd.measuredPulpToPit) &&
+    sd.measuredPulpToPit > 0.5;
+  const hasCutPhoto = input.photos.some((p) => p.role === "cross_section");
   const pulpRatioObservedFromCut =
-    Boolean(f.pulpToPitObservable) ||
-    input.photos.some((p) => p.role === "cross_section");
+    Boolean(f.pulpToPitObservable) || hasCutPhoto;
+  const hasVisualCutPulp =
+    pulpRatioObservedFromCut &&
+    typeof f.pulpToPitEstimate === "number" &&
+    Number.isFinite(f.pulpToPitEstimate) &&
+    f.pulpToPitEstimate > 0.5;
+
+  const effectivePulpToPit = hasManualPulp
+    ? clamp(sd.measuredPulpToPit!, 1.5, 9.0)
+    : hasVisualCutPulp
+    ? clamp(f.pulpToPitEstimate!, 1.5, 9.0)
+    : baseline.typicalPulpToPit;
+
+  const pulpSource: PredictionFactor["source"] = hasManualPulp
+    ? "misurazione_utente"
+    : hasVisualCutPulp
+    ? "valutazione_visiva"
+    : "media_cultivar";
+  const pulpRatioMeasured = hasManualPulp;
 
   // Converting pulp-to-pit to pulp weight fraction: pulp/(pulp+pit) = R / (R + 1)
   const typicalPulpFraction =
@@ -204,8 +224,24 @@ export function computeYieldPrediction(
     hydrationDeltaPct;
   const theoreticalFruitOilPct = round1(clamp(rawTheoreticalFruitOil, 11.5, 27.5));
 
+  // Individual factor contributions (conservative 0.1% rounding, no artificial precision)
+  const maturationDeltaPct = round1(
+    baseline.potentialPulpOilPct * (maturityMultiplier - 1)
+  );
+  const pulpDeltaPct = round1(
+    baseline.potentialPulpOilPct *
+      maturityMultiplier *
+      (pulpFractionMultiplier - 1)
+  );
+
   // 4. Mill extraction efficiency (fraction of fruit oil actually extracted into oil at the mill)
   let millEfficiencyPct = baseline.typicalMillEfficiencyPct;
+  const userSpecifiedMillEfficiency =
+    sd.millEfficiencyPreference === "alta" ||
+    sd.millEfficiencyPreference === "bassa" ||
+    (sd.customMillEfficiencyPct !== undefined &&
+      Number.isFinite(sd.customMillEfficiencyPct));
+
   if (sd.millEfficiencyPreference === "alta") {
     millEfficiencyPct = 87.5;
   } else if (sd.millEfficiencyPreference === "bassa") {
@@ -266,7 +302,7 @@ export function computeYieldPrediction(
     )
   );
 
-  // 7. Prudent Uncertainty Interval (widens whenever measurements or angles are missing!)
+  // 7. Prudent Uncertainty Interval (widens uncertainty band when measurements are missing, without penalizing central yield)
   const hasOverview = input.photos.some((p) => p.role === "overview");
   const hasCloseup = input.photos.some((p) => p.role === "closeup");
   const hasCrossSection = input.photos.some((p) => p.role === "cross_section");
@@ -287,8 +323,8 @@ export function computeYieldPrediction(
   else if (input.sampleWeightGrams >= 500) baseMargin -= 0.1;
   else if (input.sampleWeightGrams < 300) baseMargin += 0.35;
 
-  // Missing critical information increases uncertainty
-  if (!pulpRatioMeasured && !pulpRatioObservedFromCut) {
+  // Missing critical information widens interval only
+  if (!hasManualPulp && !hasVisualCutPulp) {
     baseMargin += 0.4;
   }
   if (input.cultivar === "Mista / Ignota") {
@@ -343,77 +379,86 @@ export function computeYieldPrediction(
     sampleData: sd,
   });
 
+  const millExtractionLossPct = round1(
+    theoreticalFruitOilPct * (millEfficiencyPct / 100) - theoreticalFruitOilPct
+  );
+
   const factors: PredictionFactor[] = [
     {
       id: "theoretical_fruit_oil",
-      label: "Contenuto lipidico potenziale (polpa)",
+      label: "Contenuto teorico di olio nel frutto",
       observedValue: `${formatFactorNumber(theoreticalFruitOilPct)}% su frutto`,
       impactPct: theoreticalFruitOilPct,
+      source: "media_cultivar",
+      note: `Base varietale ${input.cultivar} (~${formatFactorNumber(baseline.potentialPulpOilPct)}%) combinata con invaiatura, polpa/nocciolo e idratazione`,
+    },
+    {
+      id: "maturation_index",
+      label: "Indice di maturazione (Jaén)",
+      observedValue: `${f.veraisonIndex.toFixed(1)}/5 (${Math.round(f.greenPct)}% verdi, ${Math.round(f.turningPct)}% inv., ${Math.round(f.blackPct)}% nere)`,
+      impactPct: maturationDeltaPct,
       source: sd.fieldSources.maturation,
-      note: `${input.cultivar} · Invaiatura ${f.veraisonIndex.toFixed(1)}/5 (${Math.round(f.greenPct)}% verdi, ${Math.round(f.turningPct)}% inv., ${Math.round(f.blackPct)}% nere)`,
+      note: "Modula l'accumulo lipidico potenziale nella polpa rispetto allo stato ottimale della cultivar",
     },
     {
       id: "pulp_pit",
-      label: "Rapporto polpa / nocciolo",
-      observedValue:
-        sd.measuredPulpToPit !== undefined
-          ? `${sd.measuredPulpToPit.toFixed(1)} : 1 (misurato)`
-          : f.pulpToPitEstimate != null && pulpRatioObservedFromCut
-          ? `${f.pulpToPitEstimate.toFixed(1)} : 1 (sezione)`
-          : `~${baseline.typicalPulpToPit.toFixed(1)} : 1 (media cultivar)`,
-      impactPct: round2((pulpFractionMultiplier - 1) * baseline.potentialPulpOilPct),
-      source: pulpRatioMeasured
-        ? "misurazione_utente"
-        : pulpRatioObservedFromCut
-        ? "valutazione_visiva"
-        : "non_rilevabile",
-      note: pulpRatioMeasured
-        ? "Valore misurato dall'utente sul campione"
-        : pulpRatioObservedFromCut
-        ? "Stimato dalla foto delle olive tagliate a metà"
-        : "Sezione non presente: applicata media varietale con margine più prudente",
+      label: "Influenza del rapporto polpa / nocciolo",
+      observedValue: hasManualPulp
+        ? `${effectivePulpToPit.toFixed(1)} : 1`
+        : hasVisualCutPulp
+        ? `${effectivePulpToPit.toFixed(1)} : 1 (da sezione)`
+        : `${effectivePulpToPit.toFixed(1)} : 1 (media cultivar)`,
+      impactPct: pulpDeltaPct,
+      source: pulpSource,
+      note: hasManualPulp
+        ? "Valore misurato direttamente dall'utente sul campione"
+        : hasVisualCutPulp
+        ? "Stimato dalla fotografia delle olive tagliate a metà"
+        : "Nessuna sezione tagliata né misura manuale: applicato il valore medio della cultivar senza penalizzazioni artificiali sulla resa",
     },
     {
       id: "hydration",
-      label: "Idratazione e consistenza",
-      observedValue: `Disidratazione ${dehydrationLevel} · Polpa ${sd.consistency}`,
-      impactPct: round2(hydrationDeltaPct),
+      label: "Effetto dell'idratazione e consistenza",
+      observedValue: `Disidratazione ${dehydrationLevel} · Consistenza ${sd.consistency}`,
+      impactPct: round1(hydrationDeltaPct),
       source: sd.fieldSources.consistency,
-      note: "Incide sia sul rapporto peso fresco/olio sia sulla separabilità in gramola",
-    },
-    {
-      id: "mill_efficiency",
-      label: "Efficienza di estrazione del frantoio",
-      observedValue: `${round1(millEfficiencyPct)}% recuperato`,
-      impactPct: round2(
-        theoreticalFruitOilPct * (millEfficiencyPct / 100) - theoreticalFruitOilPct
-      ),
-      source:
-        sd.millEfficiencyPreference === "sconosciuta"
-          ? "non_rilevabile"
-          : "misurazione_utente",
-      note: "Quota di olio effettivamente estraibile rispetto al totale teorico presente nella drupa (parte resta in sansa e acque)",
+      note: "Influenza la concentrazione lipidica su peso fresco e la separabilità in gramolazione",
     },
     {
       id: "sanitary",
-      label: "Difetti, attacchi mosca e impurità",
+      label: "Perdita stimata per difetti, mosca e impurità",
       observedValue: `Danni ${Math.round(damagedPct)}% · Mosca ${Math.round(flyPct)}% · Foglie ${Math.round(f.leafDebrisPct)}%`,
-      impactPct: round2(-(defectLossPct + debrisLossPct)),
-      source: sd.fieldSources.damagedPct,
-      note: "Riduzione prudenziale della resa utile estraibile",
+      impactPct: round1(-(defectLossPct + debrisLossPct)),
+      source:
+        sd.fieldSources.damagedPct === "misurazione_utente" ||
+        sd.fieldSources.oliveFlyPct === "misurazione_utente"
+          ? "misurazione_utente"
+          : "valutazione_visiva",
+      note: "Riduzione prudenziale dovuta a drupe alterate, punture di mosca e residui vegetali",
+    },
+    {
+      id: "mill_efficiency",
+      label: "Efficienza ipotizzata del frantoio",
+      observedValue: `${round1(millEfficiencyPct)}% di olio recuperato`,
+      impactPct: millExtractionLossPct,
+      source: userSpecifiedMillEfficiency
+        ? "misurazione_utente"
+        : "modello_statistico",
+      note: "Quota di olio effettivamente estraibile rispetto al contenuto teorico del frutto (parte residua in sansa e acque)",
+    },
+    {
+      id: "historical_calibration",
+      label: "Correzione derivante dallo storico reale",
+      observedValue: calibration.applied
+        ? `${calibration.sampleCountUsed} lotti reali verificati`
+        : "Nessuna correzione applicata",
+      impactPct: round1(calibration.adjustmentPct),
+      source: calibration.applied
+        ? "misurazione_utente"
+        : "modello_statistico",
+      note: calibration.reason,
     },
   ];
-
-  if (calibration.applied) {
-    factors.push({
-      id: "historical_calibration",
-      label: "Calibrazione su storico frantoio reale",
-      observedValue: `${calibration.sampleCountUsed} lotti reali`,
-      impactPct: calibration.adjustmentPct,
-      source: "misurazione_utente",
-      note: calibration.reason,
-    });
-  }
 
   const disclaimer = f.isSimulated
     ? "Stima dimostrativa simulata: non proviene da analisi Gemini Vision né da pesatura reale al frantoio."

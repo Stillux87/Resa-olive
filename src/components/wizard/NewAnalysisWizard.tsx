@@ -1384,9 +1384,11 @@ export function NewAnalysisWizard({
                     max={8.0}
                     value={editableSampleData.measuredPulpToPit ?? ""}
                     placeholder={
-                      editableFeatures.pulpToPitEstimate != null
+                      editableFeatures.pulpToPitObservable &&
+                      editableFeatures.pulpToPitEstimate != null &&
+                      editableFeatures.pulpToPitEstimate > 0.5
                         ? `Stimato da foto sezione: ${editableFeatures.pulpToPitEstimate.toFixed(1)}`
-                        : "Non rilevabile senza foto sezione o pesatura noccioli"
+                        : "Non rilevabile: verrà usato il valore medio della cultivar"
                     }
                     onChange={(e) => {
                       const val = e.target.value ? Number(e.target.value) : undefined;
@@ -1397,9 +1399,11 @@ export function NewAnalysisWizard({
                           ...editableSampleData.fieldSources,
                           pulpToPit: val
                             ? "misurazione_utente"
-                            : editableFeatures.pulpToPitObservable
+                            : editableFeatures.pulpToPitObservable &&
+                              editableFeatures.pulpToPitEstimate != null &&
+                              editableFeatures.pulpToPitEstimate > 0.5
                             ? "valutazione_visiva"
-                            : "non_rilevabile",
+                            : "media_cultivar",
                         },
                       });
                     }}

@@ -1080,7 +1080,10 @@ export function AnalysisResultsView({
                   {sampleData.oliveCount ?? "Non rilevato"}
                 </p>
                 <p className="text-[11px] text-forest-800/60">
-                  {getParameterSourceLabel(sampleData.fieldSources.oliveCount)}
+                  {getParameterSourceLabel(
+                    sampleData.fieldSources.oliveCount,
+                    pred?.isSimulated
+                  )}
                 </p>
               </div>
               <div>
@@ -1090,7 +1093,10 @@ export function AnalysisResultsView({
                   {getConsistencyLabel(sampleData.consistency)}
                 </p>
                 <p className="text-[11px] text-forest-800/60">
-                  {getParameterSourceLabel(sampleData.fieldSources.consistency)}
+                  {getParameterSourceLabel(
+                    sampleData.fieldSources.consistency,
+                    pred?.isSimulated
+                  )}
                 </p>
               </div>
               <div>
@@ -1114,21 +1120,36 @@ export function AnalysisResultsView({
                   {Math.round(sampleData.oliveFlyPct)}%
                 </p>
                 <p className="text-[11px] text-forest-800/60">
-                  {getParameterSourceLabel(sampleData.fieldSources.damagedPct)}
+                  {getParameterSourceLabel(
+                    sampleData.fieldSources.damagedPct,
+                    pred?.isSimulated
+                  )}
                 </p>
               </div>
               <div>
                 <span className="text-forest-800/65">Rapporto polpa/nocciolo</span>
                 <p className="font-mono font-semibold text-forest-950 mt-0.5 tabular-nums">
-                  {sampleData.measuredPulpToPit !== undefined
+                  {sampleData.measuredPulpToPit !== undefined &&
+                  sampleData.measuredPulpToPit > 0.5
                     ? `${sampleData.measuredPulpToPit.toFixed(1)} : 1`
                     : features.pulpToPitObservable &&
-                      features.pulpToPitEstimate != null
+                      features.pulpToPitEstimate != null &&
+                      features.pulpToPitEstimate > 0.5
                     ? `${features.pulpToPitEstimate.toFixed(1)} : 1`
-                    : "Non misurato / non tagliate"}
+                    : "Media cultivar (nessuna sezione tagliata)"}
                 </p>
                 <p className="text-[11px] text-forest-800/60">
-                  {getParameterSourceLabel(sampleData.fieldSources.pulpToPit)}
+                  {getParameterSourceLabel(
+                    sampleData.measuredPulpToPit !== undefined &&
+                      sampleData.measuredPulpToPit > 0.5
+                      ? "misurazione_utente"
+                      : features.pulpToPitObservable &&
+                        features.pulpToPitEstimate != null &&
+                        features.pulpToPitEstimate > 0.5
+                      ? "valutazione_visiva"
+                      : "media_cultivar",
+                    pred?.isSimulated
+                  )}
                 </p>
               </div>
               <div>
@@ -1486,7 +1507,7 @@ export function AnalysisResultsView({
           <section className="lg:col-span-7 bg-white rounded-2xl border border-mineral-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-mineral-100">
               <h2 className="font-display text-lg font-semibold text-forest-950">
-                Fattori del modello di resa estraibile
+                Come è stata calcolata la resa
               </h2>
               <p className="text-xs text-forest-800/70 mt-0.5">
                 {features.summaryNote}
@@ -1502,10 +1523,13 @@ export function AnalysisResultsView({
                     <p className="text-sm font-medium text-forest-950">
                       {factor.label}
                     </p>
-                    <p className="text-xs text-forest-800/65 mt-0.5">
+                    <p className="text-xs text-forest-800/75 mt-0.5">
                       {factor.observedValue}
                       {factor.source
-                        ? ` · ${getParameterSourceLabel(factor.source)}`
+                        ? ` · Provenienza: ${getParameterSourceLabel(
+                            factor.source,
+                            pred.isSimulated
+                          )}`
                         : ""}
                     </p>
                     <p className="text-[11px] text-forest-800/60 mt-0.5">

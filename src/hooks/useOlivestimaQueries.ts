@@ -99,7 +99,7 @@ export function useStorageSummaryQuery() {
 export function useBackendHealthQuery() {
   return useQuery({
     queryKey: olivestimaKeys.backendHealth(),
-    queryFn: checkBackendHealth,
+    queryFn: () => checkBackendHealth(false),
     retry: false,
     staleTime: 60_000,
   });

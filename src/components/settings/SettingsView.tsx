@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   CheckCircle2,
   Database,
   Download,
@@ -10,12 +12,14 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  olivestimaKeys,
   useBackendHealthQuery,
   useDeleteAllDemoMutation,
   useResetDemoMutation,
   useStorageSummaryQuery,
   useUpdateSettingsMutation,
 } from "../../hooks/useOlivestimaQueries";
+import { checkBackendHealth } from "../../services/ai";
 import { exportAnalysesJson } from "../../services/persistence/indexedDb";
 import { formatBytes } from "../../services/photos/photoManager";
 import type { AiEngineMode, AppSettings } from "../../types/analysis";
@@ -26,6 +30,7 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({ settings }: SettingsViewProps) {
+  const queryClient = useQueryClient();
   const healthQuery = useBackendHealthQuery();
   const storageQuery = useStorageSummaryQuery();
   const updateSettingsMutation = useUpdateSettingsMutation();
@@ -37,14 +42,27 @@ export function SettingsView({ settings }: SettingsViewProps) {
   );
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmDeleteDemo, setConfirmDeleteDemo] = useState(false);
+  const [verifyingLive, setVerifyingLive] = useState(false);
   const [feedback, setFeedback] = useState<string>("");
 
   useEffect(() => {
     setDensityInput(String(settings.defaultDensityKgPerLiter));
   }, [settings.defaultDensityKgPerLiter]);
 
-  const backendOnline = healthQuery.data?.status === "ok";
-  const geminiReady = Boolean(healthQuery.data?.geminiConfigured);
+  const health = healthQuery.data;
+  const backendOnline = health?.status === "ok";
+  const geminiConfigured = Boolean(health?.geminiConfigured);
+  const geminiOperational = Boolean(health?.geminiOperational);
+
+  async function handleVerifyRealConnection() {
+    setVerifyingLive(true);
+    try {
+      const fresh = await checkBackendHealth(true);
+      queryClient.setQueryData(olivestimaKeys.backendHealth(), fresh);
+    } finally {
+      setVerifyingLive(false);
+    }
+  }
 
   async function handleSelectMode(mode: AiEngineMode) {
     await updateSettingsMutation.mutateAsync({ aiMode: mode });
@@ -184,34 +202,85 @@ export function SettingsView({ settings }: SettingsViewProps) {
         </div>
 
         {/* Server Status Summary */}
-        <div className="rounded-xl bg-mineral-50 border border-mineral-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2.5">
-            <ShieldCheck className="w-4 h-4 text-olive-700 shrink-0" />
+        <div className="rounded-xl bg-mineral-50 border border-mineral-200 p-4 space-y-3 text-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-olive-700 shrink-0" />
+              <div>
+                <p className="font-semibold text-forest-950">
+                  Verifica reale backend e Gemini Vision:{" "}
+                  {healthQuery.isLoading || verifyingLive
+                    ? "Verifica in corso..."
+                    : !backendOnline
+                    ? "Backend non raggiungibile"
+                    : geminiOperational
+                    ? "Operativo"
+                    : geminiConfigured
+                    ? "Chiave presente ma richiesta Gemini non riuscita"
+                    : "Chiave Gemini non configurata"}
+                </p>
+                <p className="text-forest-800/70 mt-0.5">
+                  La chiave API risiede esclusivamente lato server e non è mai esposta nel browser.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={verifyingLive || healthQuery.isFetching}
+              onClick={handleVerifyRealConnection}
+              className="min-h-[38px] px-3 py-1.5 rounded-lg bg-white border border-mineral-200 text-xs font-medium text-forest-950 hover:bg-mineral-100 flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${
+                  verifyingLive ? "animate-spin" : ""
+                }`}
+              />
+              {verifyingLive ? "Verifica..." : "Verifica connessione reale"}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-mineral-200/70">
             <div>
-              <p className="font-semibold text-forest-950">
-                Stato backend protetto:{" "}
-                {healthQuery.isLoading
-                  ? "Verifica in corso..."
-                  : backendOnline
-                  ? geminiReady
-                    ? "Connesso e pronto per Gemini Vision"
-                    : "Server attivo (chiave Gemini non configurata sul server)"
-                  : "Non raggiungibile (disponibile modalità offline)"}
+              <span className="text-forest-800/65">Backend</span>
+              <p className="font-semibold text-forest-950 mt-0.5">
+                {backendOnline ? "Disponibile" : "Non raggiungibile"}
               </p>
-              <p className="text-forest-800/70 mt-0.5">
-                La chiave API risiede esclusivamente lato server e non è mai visibile nel browser.
+            </div>
+            <div>
+              <span className="text-forest-800/65">Chiave Gemini</span>
+              <p className="font-semibold text-forest-950 mt-0.5">
+                {geminiConfigured ? "Configurata" : "Mancante"}
+              </p>
+            </div>
+            <div>
+              <span className="text-forest-800/65">Richiesta reale</span>
+              <p
+                className={`font-semibold mt-0.5 ${
+                  geminiOperational ? "text-olive-700" : "text-red-700"
+                }`}
+              >
+                {geminiOperational ? "Verificata OK" : "Non operativa"}
+              </p>
+            </div>
+            <div>
+              <span className="text-forest-800/65">Modello utilizzato</span>
+              <p className="font-mono text-[11px] font-semibold text-forest-950 mt-0.5 break-all">
+                {health?.activeModel ?? health?.primaryModel ?? "—"}
+                {health?.fallbackUsed ? " (fallback)" : ""}
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => healthQuery.refetch()}
-            className="min-h-[38px] px-3 py-1.5 rounded-lg bg-white border border-mineral-200 text-xs font-medium text-forest-950 hover:bg-mineral-100 flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Verifica stato
-          </button>
+          {health?.errorMessage && (
+            <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-red-900 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="font-semibold">Errore rilevato sul servizio Gemini</p>
+                <p className="text-[11px] leading-relaxed">{health.errorMessage}</p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

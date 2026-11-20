@@ -39,24 +39,56 @@ function normalizeEnum<T extends string>(
   return fallback;
 }
 
-export async function checkBackendHealth(): Promise<BackendHealthStatus> {
+export async function checkBackendHealth(
+  forceVerify = false
+): Promise<BackendHealthStatus> {
   try {
-    const response = await fetch("/api/health", { method: "GET" });
+    const response = await fetch(
+      forceVerify ? "/api/health?verify=true" : "/api/health",
+      { method: "GET" }
+    );
     if (!response.ok) {
-      return { status: "offline", geminiConfigured: false };
+      return {
+        status: "offline",
+        geminiConfigured: false,
+        geminiOperational: false,
+        errorMessage: `Backend HTTP ${response.status}`,
+      };
     }
     const data = (await response.json()) as {
       status?: string;
       geminiConfigured?: boolean;
+      geminiOperational?: boolean;
+      primaryModel?: string;
+      fallbackModel?: string;
+      activeModel?: string | null;
+      fallbackUsed?: boolean;
+      errorMessage?: string;
+      verifiedAt?: string;
       timestamp?: string;
     };
     return {
       status: data.status === "ok" ? "ok" : "offline",
       geminiConfigured: Boolean(data.geminiConfigured),
+      geminiOperational: Boolean(data.geminiOperational),
+      primaryModel: data.primaryModel,
+      fallbackModel: data.fallbackModel,
+      activeModel: data.activeModel ?? null,
+      fallbackUsed: Boolean(data.fallbackUsed),
+      errorMessage: data.errorMessage,
+      verifiedAt: data.verifiedAt,
       timestamp: data.timestamp,
     };
-  } catch {
-    return { status: "offline", geminiConfigured: false };
+  } catch (err) {
+    return {
+      status: "offline",
+      geminiConfigured: false,
+      geminiOperational: false,
+      errorMessage:
+        err instanceof Error
+          ? err.message
+          : "Impossibile contattare il server backend.",
+    };
   }
 }
 

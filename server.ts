@@ -42,18 +42,153 @@ function getGeminiClient(): GoogleGenAI | null {
   });
 }
 
+const PRIMARY_VISION_MODEL = "gemini-3.1-flash-lite";
+const FALLBACK_VISION_MODEL = "gemini-4-hydrogen";
+const MODEL_CALL_TIMEOUT_MS = 45_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timeout (${Math.round(ms / 1000)}s) su ${label}`));
+    }, ms);
+    promise.then(
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+interface CachedGeminiHealth {
+  checkedAtMs: number;
+  geminiOperational: boolean;
+  activeModel: string | null;
+  fallbackUsed: boolean;
+  errorMessage?: string;
+  verifiedAt: string;
+}
+
+let cachedHealth: CachedGeminiHealth | null = null;
+
+function formatGeminiError(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return "Errore sconosciuto nella comunicazione con Gemini API.";
+}
+
+async function probeGeminiModel(
+  ai: GoogleGenAI,
+  model: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await withTimeout(
+      ai.models.generateContent({
+        model,
+        contents: "Rispondi solo con OK.",
+      }),
+      20_000,
+      model
+    );
+    if (typeof res.text === "string" && res.text.trim().length > 0) {
+      return { ok: true };
+    }
+    return { ok: false, error: `Risposta vuota dal modello ${model}.` };
+  } catch (err) {
+    return { ok: false, error: formatGeminiError(err) };
+  }
+}
+
+async function verifyGeminiOperational(
+  ai: GoogleGenAI,
+  forceRefresh: boolean
+): Promise<CachedGeminiHealth> {
+  const now = Date.now();
+  if (!forceRefresh && cachedHealth && now - cachedHealth.checkedAtMs < 60_000) {
+    return cachedHealth;
+  }
+
+  const primaryProbe = await probeGeminiModel(ai, PRIMARY_VISION_MODEL);
+  if (primaryProbe.ok) {
+    cachedHealth = {
+      checkedAtMs: now,
+      geminiOperational: true,
+      activeModel: PRIMARY_VISION_MODEL,
+      fallbackUsed: false,
+      verifiedAt: new Date(now).toISOString(),
+    };
+    return cachedHealth;
+  }
+
+  const fallbackProbe = await probeGeminiModel(ai, FALLBACK_VISION_MODEL);
+  if (fallbackProbe.ok) {
+    cachedHealth = {
+      checkedAtMs: now,
+      geminiOperational: true,
+      activeModel: FALLBACK_VISION_MODEL,
+      fallbackUsed: true,
+      errorMessage: `Modello principale ${PRIMARY_VISION_MODEL} non disponibile (${primaryProbe.error}); attivo fallback su ${FALLBACK_VISION_MODEL}.`,
+      verifiedAt: new Date(now).toISOString(),
+    };
+    return cachedHealth;
+  }
+
+  cachedHealth = {
+    checkedAtMs: now,
+    geminiOperational: false,
+    activeModel: null,
+    fallbackUsed: false,
+    errorMessage: `${PRIMARY_VISION_MODEL}: ${primaryProbe.error ?? "errore"} | ${FALLBACK_VISION_MODEL}: ${fallbackProbe.error ?? "errore"}`,
+    verifiedAt: new Date(now).toISOString(),
+  };
+  return cachedHealth;
+}
+
 async function startServer() {
   const app = express();
 
   app.use(express.json({ limit: "30mb" }));
 
-  // Health & capability endpoint — never exposes secrets
-  app.get("/api/health", (_req, res) => {
-    const geminiConfigured = Boolean(getGeminiClient());
+  // Health & real Gemini verification endpoint — never exposes secrets
+  app.get("/api/health", async (req, res) => {
+    const ai = getGeminiClient();
+    const geminiConfigured = Boolean(ai);
+    const forceVerify = req.query.verify === "true" || req.query.verify === "1";
+
+    if (!ai) {
+      res.json({
+        status: "ok",
+        service: "olivestima-backend",
+        geminiConfigured: false,
+        geminiOperational: false,
+        primaryModel: PRIMARY_VISION_MODEL,
+        fallbackModel: FALLBACK_VISION_MODEL,
+        activeModel: null,
+        fallbackUsed: false,
+        errorMessage:
+          "Variabile GEMINI_API_KEY non configurata lato server.",
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const probe = await verifyGeminiOperational(ai, forceVerify);
     res.json({
       status: "ok",
       service: "olivestima-backend",
-      geminiConfigured,
+      geminiConfigured: true,
+      geminiOperational: probe.geminiOperational,
+      primaryModel: PRIMARY_VISION_MODEL,
+      fallbackModel: FALLBACK_VISION_MODEL,
+      activeModel: probe.activeModel,
+      fallbackUsed: probe.fallbackUsed,
+      errorMessage: probe.errorMessage,
+      verifiedAt: probe.verifiedAt,
       timestamp: new Date().toISOString(),
     });
   });
@@ -108,15 +243,16 @@ REGOLE RIGOROSE DI INTEGRITÀ SCIENTIFICA:
 5. Se le foto sono sfocate, troppo buie, con riflessi eccessivi, troppo distanti, o non mostrano olive chiaramente (es. immagine non pertinente), imposta imageQualitySufficient=false, spiega i motivi in qualityIssues e richiedi le foto mancanti in recommendedSupplementalRoles.
 6. Non presentare mai una stima visiva come misurazione di laboratorio chimico.`;
 
-      const callGemini = () =>
-        ai.models.generateContent({
-          model: "gemini-4-hydrogen",
-          contents: {
-            parts: [...imageParts, { text: promptText }],
-          },
-          config: {
-            systemInstruction:
-              "Rispondi esclusivamente in italiano con un oggetto JSON valido aderente allo schema richiesto. Sii prudente, realistico e segnala sempre quando un parametro non è osservabile dalle immagini.",
+      const callGeminiWithModel = (model: string) =>
+        withTimeout(
+          ai.models.generateContent({
+            model,
+            contents: {
+              parts: [...imageParts, { text: promptText }],
+            },
+            config: {
+              systemInstruction:
+                "Rispondi esclusivamente in italiano con un oggetto JSON valido aderente allo schema richiesto. Sii prudente, realistico e segnala sempre quando un parametro non è osservabile dalle immagini.",
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -255,31 +391,67 @@ REGOLE RIGOROSE DI INTEGRITÀ SCIENTIFICA:
               ],
             },
           },
-        });
+        }),
+          MODEL_CALL_TIMEOUT_MS,
+          model
+        );
 
       let response;
+      let usedModel = PRIMARY_VISION_MODEL;
+      let fallbackUsed = false;
+      let primaryError: string | undefined;
+
       try {
-        response = await callGemini();
-      } catch {
-        await new Promise((r) => setTimeout(r, 600));
-        response = await callGemini();
+        response = await callGeminiWithModel(PRIMARY_VISION_MODEL);
+      } catch (errPrimary) {
+        primaryError = formatGeminiError(errPrimary);
+        // Controlled fallback to secondary Vision model
+        usedModel = FALLBACK_VISION_MODEL;
+        fallbackUsed = true;
+        try {
+          response = await callGeminiWithModel(FALLBACK_VISION_MODEL);
+        } catch (errFallback) {
+          const fallbackError = formatGeminiError(errFallback);
+          throw new Error(
+            `Modello principale ${PRIMARY_VISION_MODEL}: ${primaryError} | Fallback ${FALLBACK_VISION_MODEL}: ${fallbackError}`
+          );
+        }
       }
 
       const parsed = JSON.parse((response.text ?? "{}").trim()) as Record<string, unknown>;
-      if (!hasCutPhoto && !parsed.pulpToPitObservable) {
+      if (!hasCutPhoto) {
         parsed.pulpToPitObservable = false;
         parsed.pulpToPitEstimate = 0;
       }
 
+      // Refresh cached health with the model that just succeeded
+      cachedHealth = {
+        checkedAtMs: Date.now(),
+        geminiOperational: true,
+        activeModel: usedModel,
+        fallbackUsed,
+        errorMessage: fallbackUsed
+          ? `Modello principale ${PRIMARY_VISION_MODEL} non disponibile (${primaryError}); attivo fallback su ${FALLBACK_VISION_MODEL}.`
+          : undefined,
+        verifiedAt: new Date().toISOString(),
+      };
+
       res.json({
-        provider: "gemini-4-hydrogen",
+        provider: usedModel,
+        fallbackUsed,
+        primaryError: fallbackUsed ? primaryError : undefined,
         features: parsed,
       });
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Errore sconosciuto durante l'analisi multimodale.";
+      const message = formatGeminiError(error);
+      cachedHealth = {
+        checkedAtMs: Date.now(),
+        geminiOperational: false,
+        activeModel: null,
+        fallbackUsed: false,
+        errorMessage: message,
+        verifiedAt: new Date().toISOString(),
+      };
       res.status(502).json({
         error: "GEMINI_UPSTREAM_ERROR",
         message,
