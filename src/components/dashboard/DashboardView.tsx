@@ -1,5 +1,11 @@
+import { useState } from "react";
 import { ArrowRight, Camera, ChevronRight, Info, Scale } from "lucide-react";
-import type { AggregateStats, AiEngineMode, OliveAnalysisRecord } from "../../types/analysis";
+import type {
+  AggregateStats,
+  AiEngineMode,
+  CalibrationSummary,
+  OliveAnalysisRecord,
+} from "../../types/analysis";
 import {
   formatDateIt,
   formatGrams,
@@ -15,24 +21,36 @@ import type { AppRoute } from "../layout/AppShell";
 const HERO_IMAGE_URL = "/src/assets/images/hero_olive_harvest_1795170878588.jpg";
 
 interface DashboardViewProps {
-  analyses: OliveAnalysisRecord[];
-  stats: AggregateStats | null;
+  realRecords: OliveAnalysisRecord[];
+  demoRecords: OliveAnalysisRecord[];
+  realStats: AggregateStats | null;
+  demoStats: AggregateStats | null;
+  calibrationSummary: CalibrationSummary | null;
   aiMode: AiEngineMode;
   isLoading: boolean;
   onNavigate: (route: AppRoute) => void;
 }
 
 export function DashboardView({
-  analyses,
-  stats,
+  realRecords,
+  demoRecords,
+  realStats,
+  demoStats,
+  calibrationSummary,
   aiMode,
   isLoading,
   onNavigate,
 }: DashboardViewProps) {
-  const recentAnalyses = analyses.slice(0, 4);
-  const pendingMill = analyses.filter(
+  const [scope, setScope] = useState<"real" | "demo">("real");
+
+  const activeRecords = scope === "real" ? realRecords : demoRecords;
+  const activeStats = scope === "real" ? realStats : demoStats;
+  const recentAnalyses = activeRecords.slice(0, 4);
+  const pendingMill = activeRecords.filter(
     (a) => a.status === "completata" || a.status === "richiesta_foto"
   );
+
+  const seasonalPoints = activeStats?.seasonalSeries ?? [];
 
   return (
     <div className="space-y-8">
@@ -42,13 +60,16 @@ export function DashboardView({
           <div className="lg:col-span-7 p-6 md:p-9 flex flex-col justify-between gap-6 text-white">
             <div className="space-y-3">
               <p className="text-xs font-medium text-gold-200 tracking-wide">
-                OLIVESTIMA · {aiMode === "gemini_backend" ? "Integrazione Gemini attiva" : "Modalità dimostrativa offline"}
+                OLIVESTIMA ·{" "}
+                {aiMode === "gemini_backend"
+                  ? "Analisi Gemini Vision attiva"
+                  : "Modalità offline locale"}
               </p>
               <h1 className="font-display text-3xl md:text-4xl font-semibold leading-tight text-balance">
-                Stima la resa olearia dal campione fotografico al frantoio
+                Stima la resa effettiva in olio su 100 kg di olive al frantoio
               </h1>
               <p className="text-sm md:text-base text-white/80 max-w-xl leading-relaxed">
-                Acquisisci le foto del campione di olive, registra il peso in grammi e ottieni una previsione statistica con intervallo di incertezza, chilogrammi e litri attesi.
+                Combina l&apos;analisi fotografica Gemini Vision, i dati fisici del campione e i risultati reali di molitura per calcolare resa probabile, forbice di incertezza e consiglio sulla raccolta.
               </p>
             </div>
 
@@ -66,7 +87,7 @@ export function DashboardView({
                 onClick={() => onNavigate({ view: "history" })}
                 className="min-h-[46px] px-5 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                Storico analisi
+                Storico e confronti
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -84,76 +105,173 @@ export function DashboardView({
         </div>
       </section>
 
-      {/* Transparent Simulation Disclaimer */}
-      <section
-        aria-label="Avviso dati simulati"
-        className="rounded-xl bg-gold-50 border border-gold-200 px-4 py-3.5 flex items-start gap-3 text-xs md:text-sm text-forest-950"
-      >
-        <Info className="w-4 h-4 text-gold-700 shrink-0 mt-0.5" />
-        <p className="leading-relaxed">
-          <strong className="font-semibold">Trasparenza delle stime:</strong> i lotti precaricati sono dati dimostrativi contrassegnati come simulati. Le rese previste rappresentano stime statistiche indicative basate su parametri visivi e non costituiscono misure chimiche o pesate reali di frantoio.
-        </p>
+      {/* Strict Demo vs Real Separation Bar */}
+      <section className="rounded-xl bg-white border border-mineral-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-2.5 text-xs text-forest-900">
+          <Info className="w-4 h-4 text-gold-700 shrink-0 mt-0.5" />
+          <p className="leading-relaxed">
+            {scope === "real" ? (
+              <>
+                <strong className="font-semibold">
+                  Vista Dati Reali ({realRecords.length} campioni):
+                </strong>{" "}
+                i {demoRecords.length} lotti dimostrativi sono isolati e non influenzano né le statistiche né la calibrazione del modello.
+              </>
+            ) : (
+              <>
+                <strong className="font-semibold">
+                  Vista Campioni Demo ({demoRecords.length} lotti simulati):
+                </strong>{" "}
+                dati puramente dimostrativi per esplorare il funzionamento dell&apos;app, separati dai tuoi lotti reali.
+              </>
+            )}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-1 p-1 bg-mineral-100 rounded-xl shrink-0">
+          <button
+            type="button"
+            onClick={() => setScope("real")}
+            className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
+              scope === "real"
+                ? "bg-white text-forest-950 shadow-xs font-semibold"
+                : "text-forest-800/75 hover:text-forest-950"
+            }`}
+          >
+            I tuoi dati reali ({realRecords.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setScope("demo")}
+            className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
+              scope === "demo"
+                ? "bg-white text-forest-950 shadow-xs font-semibold"
+                : "text-forest-800/75 hover:text-forest-950"
+            }`}
+          >
+            Demo simulati ({demoRecords.length})
+          </button>
+        </div>
       </section>
 
       {/* 4-Column KPI Strip */}
       <section aria-label="Indicatori principali">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           <KpiCard
-            label="Analisi salvate"
-            value={isLoading ? "—" : String(stats?.totalAnalyses ?? 0)}
-            subtext={`${stats?.verifiedCount ?? 0} verificate al frantoio`}
-          />
-          <KpiCard
-            label="Resa media prevista"
+            label={
+              scope === "real"
+                ? "Resa media prevista"
+                : "Resa media prevista (demo)"
+            }
             value={
-              isLoading || stats?.meanPredictedYieldPct == null
+              isLoading || activeStats?.meanPredictedYieldPct == null
                 ? "—"
-                : formatPct(stats.meanPredictedYieldPct)
+                : formatPct(activeStats.meanPredictedYieldPct)
             }
             subtext={
-              stats?.meanActualYieldPct != null
-                ? `Reale media: ${formatPct(stats.meanActualYieldPct)}`
-                : "In attesa di dati frantoio"
+              activeStats && activeStats.totalAnalyses > 0
+                ? `Su ${activeStats.totalAnalyses} campioni (${formatKg(
+                    activeStats.totalEstimatedOilKg,
+                    0
+                  )} stimati)`
+                : "Avvia una nuova analisi"
+            }
+          />
+          <KpiCard
+            label="Risultati reali frantoio"
+            value={
+              isLoading || activeStats?.meanActualYieldPct == null
+                ? "—"
+                : formatPct(activeStats.meanActualYieldPct)
+            }
+            subtext={
+              activeStats && activeStats.verifiedCount > 0
+                ? `${activeStats.verifiedCount} lotti verificati (${formatLiters(
+                    activeStats.totalActualOilLiters,
+                    0
+                  )})`
+                : "In attesa di conferme frantoio"
             }
           />
           <KpiCard
             label="Errore medio (MAE)"
             value={
-              isLoading || stats?.meanAbsoluteErrorPct == null
+              isLoading || activeStats?.meanAbsoluteErrorPct == null
                 ? "—"
-                : formatPct(stats.meanAbsoluteErrorPct)
+                : formatPct(activeStats.meanAbsoluteErrorPct)
             }
             subtext={
-              stats?.meanSignedBiasPct != null
-                ? `Scostamento: ${formatSignedPct(stats.meanSignedBiasPct)}`
+              activeStats?.meanSignedBiasPct != null
+                ? `Scostamento: ${formatSignedPct(activeStats.meanSignedBiasPct)}`
                 : "Calcolato dopo la molitura"
             }
           />
           <KpiCard
-            label="Olio stimato totale"
+            label="Calibrazione modello"
             value={
-              isLoading || !stats
-                ? "—"
-                : formatLiters(stats.totalEstimatedOilLiters, 0)
+              calibrationSummary?.calibrationActive
+                ? "Attiva"
+                : `${calibrationSummary?.realVerifiedCount ?? 0}/${
+                    calibrationSummary?.minimumRequiredForAdjustment ?? 3
+                  }`
             }
             subtext={
-              stats ? `${formatKg(stats.totalEstimatedOilKg, 0)} su ${formatKg(stats.totalLotWeightKg, 0)} olive` : ""
+              calibrationSummary?.calibrationActive
+                ? "Taratura prudente su dati reali"
+                : "Servono almeno 3 lotti reali verificati"
             }
           />
         </div>
       </section>
 
-      {/* Main Content Split: Recent Analyses + Actionable Follow-ups */}
+      {/* Seasonal Trend Mini Chart — Andamento della stagione */}
+      <section className="bg-white rounded-2xl border border-mineral-200 p-5 md:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 className="font-display text-lg font-semibold text-forest-950">
+              Andamento della stagione ({scope === "real" ? "lotti reali" : "demo"})
+            </h2>
+            <p className="text-xs text-forest-800/70">
+              Evoluzione della resa prevista (%) e dei riscontri reali nel corso della campagna olearia
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate({ view: "stats" })}
+            className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-mineral-100 hover:bg-olive-100 text-xs font-semibold text-forest-950 cursor-pointer whitespace-nowrap self-start sm:self-auto"
+          >
+            Tutti i 5 grafici statistici
+          </button>
+        </div>
+
+        {seasonalPoints.length === 0 ? (
+          <div className="py-6 text-center space-y-2">
+            <p className="text-xs text-forest-800/70">
+              Nessun campione reale salvato ancora per tracciare l&apos;andamento stagionale.
+            </p>
+            <button
+              type="button"
+              onClick={() => onNavigate({ view: "wizard" })}
+              className="min-h-[40px] px-4 py-2 rounded-xl bg-forest-900 text-white text-xs font-semibold cursor-pointer"
+            >
+              Analizza il primo campione
+            </button>
+          </div>
+        ) : (
+          <SeasonalSparkChart points={seasonalPoints} />
+        )}
+      </section>
+
+      {/* Main Content Split: Ultimi campioni + Conferme dal frantoio */}
       <div className="grid lg:grid-cols-12 gap-6 items-start">
-        {/* Recent Analyses */}
         <section className="lg:col-span-8 bg-white rounded-2xl border border-mineral-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-mineral-100 flex items-center justify-between gap-4">
             <div>
               <h2 className="font-display text-lg font-semibold text-forest-950">
-                Analisi recenti
+                Ultimi campioni ({scope === "real" ? "reali" : "demo"})
               </h2>
               <p className="text-xs text-forest-800/65">
-                Archivio locale sincronizzato in IndexedDB
+                Archivio locale IndexedDB persistente sul dispositivo
               </p>
             </div>
             <button
@@ -161,7 +279,7 @@ export function DashboardView({
               onClick={() => onNavigate({ view: "history" })}
               className="min-h-[40px] px-3 py-1.5 text-xs font-semibold text-forest-900 hover:text-gold-700 transition-colors cursor-pointer whitespace-nowrap"
             >
-              Vedi tutto
+              Vedi storico
             </button>
           </div>
 
@@ -177,7 +295,7 @@ export function DashboardView({
           ) : recentAnalyses.length === 0 ? (
             <div className="p-8 text-center space-y-3">
               <p className="text-sm text-forest-800/75">
-                Nessuna analisi presente nell&apos;archivio locale.
+                Nessun campione reale ancora registrato.
               </p>
               <button
                 type="button"
@@ -220,8 +338,9 @@ export function DashboardView({
                           {item.title}
                         </p>
                         <p className="text-xs text-forest-800/70 truncate mt-0.5">
-                          {item.cultivar} · {formatGrams(item.sampleWeightGrams)} ·{" "}
-                          {formatDateIt(item.harvestDate)} · {getOriginLabel(item.dataOrigin)}
+                          {item.cultivar} · {formatGrams(item.sampleWeightGrams)}{" "}
+                          · {formatDateIt(item.harvestDate)} ·{" "}
+                          {getOriginLabel(item.dataOrigin)}
                         </p>
                       </div>
                     </div>
@@ -235,7 +354,9 @@ export function DashboardView({
                         </p>
                         <p className="text-[11px] text-forest-800/65 tabular-nums">
                           {item.millOutcome
-                            ? `Frantoio ${formatPct(item.millOutcome.actualYieldPct)}`
+                            ? `Frantoio ${formatPct(
+                                item.millOutcome.actualYieldPct
+                              )}`
                             : getStatusLabel(item.status)}
                         </p>
                       </div>
@@ -258,12 +379,12 @@ export function DashboardView({
               <Scale className="w-4 h-4 text-gold-600 shrink-0" />
             </div>
             <p className="text-xs text-forest-800/75 leading-relaxed">
-              Registra la resa reale dopo la molitura per confrontare previsione e risultato effettivo e migliorare la taratura statistica dei tuoi lotti.
+              Registra i kg e litri effettivi dopo la molitura per migliorare la calibrazione del modello sui tuoi lotti reali.
             </p>
 
             {pendingMill.length === 0 ? (
               <p className="text-xs text-forest-800/60 py-2">
-                Tutti i lotti stimati hanno già una verifica di frantoio registrata.
+                Nessun lotto in attesa di verifica frantoio in questa vista.
               </p>
             ) : (
               <div className="divide-y divide-mineral-100">
@@ -283,7 +404,11 @@ export function DashboardView({
                       <p className="text-[11px] text-forest-800/65 truncate">
                         {item.status === "richiesta_foto"
                           ? "Foto supplementare suggerita"
-                          : `Stima ${item.prediction ? formatPct(item.prediction.predictedYieldPct) : "—"}`}
+                          : `Stima ${
+                              item.prediction
+                                ? formatPct(item.prediction.predictedYieldPct)
+                                : "—"
+                            }`}
                       </p>
                     </div>
                     <span className="text-xs font-medium text-forest-900 whitespace-nowrap shrink-0">
@@ -300,7 +425,7 @@ export function DashboardView({
               Statistiche & Motore AI
             </h3>
             <p className="text-xs text-forest-800/75 leading-relaxed">
-              Esplora il grafico di scostamento per cultivar oppure configura l&apos;integrazione con il backend protetto Gemini multimodale.
+              Visualizza i 5 grafici stagionali o configura densità dell&apos;olio e gestione dell&apos;archivio demo.
             </p>
             <div className="flex flex-wrap gap-2 pt-1">
               <button
@@ -308,18 +433,126 @@ export function DashboardView({
                 onClick={() => onNavigate({ view: "stats" })}
                 className="min-h-[40px] px-3.5 py-2 rounded-xl bg-mineral-100 hover:bg-olive-100 text-forest-950 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
               >
-                Statistiche aggregate
+                Statistiche complete
               </button>
               <button
                 type="button"
                 onClick={() => onNavigate({ view: "settings" })}
                 className="min-h-[40px] px-3.5 py-2 rounded-xl bg-mineral-100 hover:bg-olive-100 text-forest-950 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
               >
-                Configurazione AI
+                Impostazioni
               </button>
             </div>
           </div>
         </aside>
+      </div>
+    </div>
+  );
+}
+
+function SeasonalSparkChart({
+  points,
+}: {
+  points: AggregateStats["seasonalSeries"];
+}) {
+  const width = 640;
+  const height = 160;
+  const padX = 36;
+  const padY = 20;
+  const minY = 9;
+  const maxY = 24;
+
+  const toX = (idx: number) =>
+    points.length <= 1
+      ? width / 2
+      : padX + (idx / (points.length - 1)) * (width - padX * 2);
+  const toY = (val: number) => {
+    const clamped = Math.min(maxY, Math.max(minY, val));
+    return height - padY - ((clamped - minY) / (maxY - minY)) * (height - padY * 2);
+  };
+
+  const predictedPath = points
+    .map((p, idx) => `${idx === 0 ? "M" : "L"} ${toX(idx)} ${toY(p.predictedYieldPct)}`)
+    .join(" ");
+
+  return (
+    <div className="space-y-2">
+      <div className="w-full overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="w-full min-w-[420px] h-40"
+          role="img"
+          aria-label="Grafico andamento resa stagionale"
+        >
+          {[10, 15, 20].map((tick) => (
+            <g key={tick}>
+              <line
+                x1={padX}
+                x2={width - padX}
+                y1={toY(tick)}
+                y2={toY(tick)}
+                stroke="#e2e5de"
+                strokeDasharray="3 3"
+              />
+              <text
+                x={8}
+                y={toY(tick) + 4}
+                fontSize="10"
+                fill="#526052"
+                fontFamily="monospace"
+              >
+                {tick}%
+              </text>
+            </g>
+          ))}
+          <path
+            d={predictedPath}
+            fill="none"
+            stroke="#1b3a24"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {points.map((p, idx) => (
+            <g key={p.id}>
+              <circle
+                cx={toX(idx)}
+                cy={toY(p.predictedYieldPct)}
+                r="4"
+                fill="#1b3a24"
+              />
+              {p.actualYieldPct !== null && (
+                <circle
+                  cx={toX(idx)}
+                  cy={toY(p.actualYieldPct)}
+                  r="4.5"
+                  fill="#c59b27"
+                  stroke="#132919"
+                  strokeWidth="1.2"
+                />
+              )}
+              <text
+                x={toX(idx)}
+                y={height - 4}
+                textAnchor="middle"
+                fontSize="9.5"
+                fill="#526052"
+              >
+                {formatDateIt(p.date)}
+              </text>
+            </g>
+          ))}
+        </svg>
+      </div>
+      <div className="flex items-center gap-5 text-[11px] text-forest-800/70">
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 bg-forest-900 inline-block" />
+          Resa prevista (%)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-gold-500 border border-forest-950 inline-block" />
+          Resa reale frantoio (%)
+        </span>
       </div>
     </div>
   );

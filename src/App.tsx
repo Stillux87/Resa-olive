@@ -14,8 +14,8 @@ import { StatisticsView } from "./components/stats/StatisticsView";
 import { NewAnalysisWizard } from "./components/wizard/NewAnalysisWizard";
 import {
   useAggregateStatsQuery,
-  useAnalysesQuery,
   useAppSettingsQuery,
+  useDeleteAllDemoMutation,
 } from "./hooks/useOlivestimaQueries";
 import { OLIVE_OIL_DENSITY_KG_PER_LITER } from "./types/analysis";
 
@@ -30,14 +30,21 @@ const queryClient = new QueryClient({
 
 function OlivestimaWorkspace() {
   const [route, setRoute] = useState<AppRoute>({ view: "dashboard" });
-  const analysesQuery = useAnalysesQuery();
-  const { stats } = useAggregateStatsQuery();
+  const {
+    realRecords,
+    demoRecords,
+    realStats,
+    demoStats,
+    calibrationSummary,
+    isLoading,
+  } = useAggregateStatsQuery();
   const settingsQuery = useAppSettingsQuery();
+  const deleteAllDemoMutation = useDeleteAllDemoMutation();
 
   const settings = settingsQuery.data ?? {
-    aiMode: "simulato_locale" as const,
+    aiMode: "gemini_backend" as const,
     defaultDensityKgPerLiter: OLIVE_OIL_DENSITY_KG_PER_LITER,
-    seededDemoVersion: 1,
+    seededDemoVersion: 2,
   };
 
   function navigateTo(next: AppRoute) {
@@ -49,10 +56,13 @@ function OlivestimaWorkspace() {
     <AppShell route={route} onNavigate={navigateTo}>
       {route.view === "dashboard" && (
         <DashboardView
-          analyses={analysesQuery.data ?? []}
-          stats={stats}
+          realRecords={realRecords}
+          demoRecords={demoRecords}
+          realStats={realStats}
+          demoStats={demoStats}
+          calibrationSummary={calibrationSummary}
           aiMode={settings.aiMode}
-          isLoading={analysesQuery.isLoading}
+          isLoading={isLoading}
           onNavigate={navigateTo}
         />
       )}
@@ -60,6 +70,7 @@ function OlivestimaWorkspace() {
       {route.view === "wizard" && (
         <NewAnalysisWizard
           aiMode={settings.aiMode}
+          densityKgPerLiter={settings.defaultDensityKgPerLiter}
           onComplete={(analysisId) =>
             navigateTo({ view: "detail", analysisId })
           }
@@ -71,26 +82,34 @@ function OlivestimaWorkspace() {
         <AnalysisResultsView
           analysisId={route.analysisId}
           aiMode={settings.aiMode}
+          densityKgPerLiter={settings.defaultDensityKgPerLiter}
           onBack={() => navigateTo({ view: "history" })}
         />
       )}
 
       {route.view === "history" && (
         <HistoryView
-          analyses={analysesQuery.data ?? []}
-          isLoading={analysesQuery.isLoading}
+          realRecords={realRecords}
+          demoRecords={demoRecords}
+          isLoading={isLoading}
           onSelectAnalysis={(analysisId) =>
             navigateTo({ view: "detail", analysisId })
           }
           onStartNew={() => navigateTo({ view: "wizard" })}
+          onDeleteAllDemo={() => deleteAllDemoMutation.mutateAsync()}
+          isDeletingDemo={deleteAllDemoMutation.isPending}
         />
       )}
 
       {route.view === "stats" && (
         <StatisticsView
-          analyses={analysesQuery.data ?? []}
-          stats={stats}
-          isLoading={analysesQuery.isLoading}
+          realRecords={realRecords}
+          demoRecords={demoRecords}
+          realStats={realStats}
+          demoStats={demoStats}
+          calibrationSummary={calibrationSummary}
+          densityKgPerLiter={settings.defaultDensityKgPerLiter}
+          isLoading={isLoading}
           onSelectAnalysis={(analysisId) =>
             navigateTo({ view: "detail", analysisId })
           }

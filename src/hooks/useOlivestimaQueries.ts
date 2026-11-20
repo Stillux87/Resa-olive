@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 import { checkBackendHealth } from "../services/ai";
 import {
+  deleteAllDemoAnalyses,
   deleteAnalysisFromDb,
   getAnalysisById,
   getAppSettings,
@@ -15,6 +16,10 @@ import {
   updateAppSettings,
   updateMillOutcomeInDb,
 } from "../services/persistence/indexedDb";
+import {
+  buildCalibrationSummary,
+  isDemoAnalysis,
+} from "../services/prediction/calibration";
 import { computeAggregateStats } from "../services/prediction/yieldEngine";
 import type {
   AppSettings,
@@ -51,13 +56,27 @@ export function useAnalysisDetailQuery(id: string | null) {
 
 export function useAggregateStatsQuery() {
   const analysesQuery = useAnalysesQuery();
-  const stats = analysesQuery.data
-    ? computeAggregateStats(analysesQuery.data)
+  const all = analysesQuery.data ?? [];
+  const realRecords = all.filter((r) => !isDemoAnalysis(r));
+  const demoRecords = all.filter((r) => isDemoAnalysis(r));
+
+  const realStats = analysesQuery.data
+    ? computeAggregateStats(realRecords)
+    : null;
+  const demoStats = analysesQuery.data
+    ? computeAggregateStats(demoRecords)
+    : null;
+  const calibrationSummary = analysesQuery.data
+    ? buildCalibrationSummary(realRecords)
     : null;
 
   return {
     ...analysesQuery,
-    stats,
+    realRecords,
+    demoRecords,
+    realStats,
+    demoStats,
+    calibrationSummary,
   };
 }
 
@@ -176,6 +195,21 @@ export function useDeleteAnalysisMutation() {
         olivestimaKeys.analyses(),
         (prev) => (prev ? prev.filter((r) => r.id !== analysisId) : [])
       );
+      queryClient.invalidateQueries({ queryKey: olivestimaKeys.storage() });
+    },
+  });
+}
+
+export function useDeleteAllDemoMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      await deleteAllDemoAnalyses();
+      return listAnalyses();
+    },
+    onSuccess: (records) => {
+      queryClient.setQueryData(olivestimaKeys.analyses(), records);
       queryClient.invalidateQueries({ queryKey: olivestimaKeys.storage() });
     },
   });

@@ -19,6 +19,7 @@ export interface AiAnalysisInput {
   cultivar: OliveCultivar;
   sampleWeightGrams: number;
   lotWeightKg: number;
+  oliveCount?: number;
   groveLocation: string;
   photos: Array<{
     asset: PhotoAsset;
@@ -55,18 +56,29 @@ export function buildSupplementalRequest(
       return {
         id: `req_${role}`,
         role,
-        title: "Sezione trasversale (olive tagliate)",
+        title: "Olive tagliate a metà (polpa/nocciolo)",
         instruction:
           "Taglia a metà nel senso della lunghezza 3 olive rappresentative del campione e fotografale dall'alto su fondo neutro.",
         reason,
         expectedUncertaintyReductionPct: 0.5,
         required: false,
       };
+    case "closeup":
+      return {
+        id: `req_${role}`,
+        role,
+        title: "Vista ravvicinata delle drupe",
+        instruction:
+          "Avvicina la fotocamera a 15–20 cm da 6–10 olive per rendere leggibili buccia, lenticelle ed eventuali lesioni.",
+        reason,
+        expectedUncertaintyReductionPct: 0.4,
+        required: false,
+      };
     case "supplemental_lighting":
       return {
         id: `req_${role}`,
         role,
-        title: "Scatto a luce naturale diffusa",
+        title: "Scatto aggiuntivo a luce naturale diffusa",
         instruction:
           "Ripeti uno scatto all'ombra luminosa (senza flash diretto né ombre nette) mantenendo il telefono parallelo al piano.",
         reason,
@@ -78,9 +90,9 @@ export function buildSupplementalRequest(
       return {
         id: "req_supplemental_defect",
         role: "supplemental_defect",
-        title: "Dettaglio ravvicinato integrità drupe",
+        title: "Dettaglio difetti e segni di mosca",
         instruction:
-          "Avvicina la fotocamera a 15–20 cm da 6–8 olive per verificare eventuale raggrinzimento o punture di mosca olearia.",
+          "Inquadra da vicino eventuali olive con punture, macchie scure o raggrinzimenti per stimare la quota danneggiata.",
         reason,
         expectedUncertaintyReductionPct: 0.4,
         required: false,

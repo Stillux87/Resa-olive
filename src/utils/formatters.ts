@@ -1,7 +1,13 @@
 import type {
   AnalysisDataOrigin,
   AnalysisStatus,
+  DehydrationLevel,
+  MaturationUniformity,
+  MillEfficiencyPreference,
   MillExtractionMethod,
+  OliveConsistency,
+  OliveSizeCategory,
+  ParameterSource,
   PhotoQualityMetrics,
 } from "../types/analysis";
 
@@ -59,11 +65,11 @@ export function getStatusLabel(status: AnalysisStatus): string {
 export function getOriginLabel(origin: AnalysisDataOrigin): string {
   switch (origin) {
     case "simulato_demo":
-      return "Simulato (Demo)";
+      return "Demo simulato";
     case "stima_locale":
-      return "Stima locale simulata";
+      return "Fallback locale simulato";
     case "gemini_backend":
-      return "Gemini multimodale";
+      return "Gemini Vision (reale)";
   }
 }
 
@@ -90,5 +96,81 @@ export function getPhotoQualityLabel(
       return "Luce non uniforme";
     case "sfocata":
       return "Nitidezza ridotta";
+  }
+}
+
+export function getParameterSourceLabel(source?: ParameterSource): string {
+  switch (source) {
+    case "misurazione_utente":
+      return "Misurazione / dato utente";
+    case "non_rilevabile":
+      return "Non rilevabile da foto";
+    case "valutazione_visiva":
+    default:
+      return "Valutazione visiva AI";
+  }
+}
+
+export function getSizeLabel(size?: OliveSizeCategory): string {
+  switch (size) {
+    case "piccola":
+      return "Piccola";
+    case "grande":
+      return "Grande";
+    case "media":
+    default:
+      return "Media";
+  }
+}
+
+export function getConsistencyLabel(c?: OliveConsistency): string {
+  switch (c) {
+    case "soda":
+      return "Soda";
+    case "molle":
+      return "Molle";
+    case "media":
+    default:
+      return "Media";
+  }
+}
+
+export function getDehydrationLabel(d?: DehydrationLevel): string {
+  switch (d) {
+    case "lieve":
+      return "Lieve";
+    case "moderata":
+      return "Moderata";
+    case "marcata":
+      return "Marcata";
+    case "assente":
+    default:
+      return "Assente";
+  }
+}
+
+export function getUniformityLabel(u?: MaturationUniformity): string {
+  switch (u) {
+    case "alta":
+      return "Alta";
+    case "bassa":
+      return "Bassa";
+    case "media":
+    default:
+      return "Media";
+  }
+}
+
+export function getMillEfficiencyPrefLabel(p?: MillEfficiencyPreference): string {
+  switch (p) {
+    case "alta":
+      return "Alta (impianto 2 fasi ottimizzato)";
+    case "bassa":
+      return "Bassa / tradizionale";
+    case "standard":
+      return "Standard (~84-85%)";
+    case "sconosciuta":
+    default:
+      return "Non conosciuta";
   }
 }

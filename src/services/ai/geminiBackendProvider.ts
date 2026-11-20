@@ -1,4 +1,8 @@
 import type {
+  DehydrationLevel,
+  MaturationUniformity,
+  OliveConsistency,
+  OliveSizeCategory,
   SamplePhotoRole,
   SupplementalPhotoRequest,
   VisualMorphologyFeatures,
@@ -14,9 +18,26 @@ import {
 
 const ALLOWED_SUPPLEMENTAL_ROLES: SamplePhotoRole[] = [
   "cross_section",
+  "closeup",
   "supplemental_defect",
   "supplemental_lighting",
 ];
+
+function clamp(val: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, val));
+}
+
+function normalizeEnum<T extends string>(
+  raw: unknown,
+  allowed: readonly T[],
+  fallback: T
+): T {
+  if (typeof raw === "string") {
+    const clean = raw.trim().toLowerCase() as T;
+    if (allowed.includes(clean)) return clean;
+  }
+  return fallback;
+}
 
 export async function checkBackendHealth(): Promise<BackendHealthStatus> {
   try {
@@ -41,19 +62,19 @@ export async function checkBackendHealth(): Promise<BackendHealthStatus> {
 
 export const geminiBackendProvider: MultimodalAnalysisProvider = {
   id: "gemini_backend",
-  label: "Gemini Multimodale (Backend Protetto)",
+  label: "Gemini Vision (Backend Protetto)",
 
   async analyzeSample(input: AiAnalysisInput): Promise<AiAnalysisOutput> {
     input.onProgress?.({
       stepIndex: 1,
       totalSteps: 4,
       label: "Preparazione immagini campione",
-      detail: "Codifica sicura delle fotografie acquisite",
-      progressPct: 22,
+      detail: `Codifica di ${input.photos.length} fotografie per Gemini Vision`,
+      progressPct: 20,
     });
 
     const encodedPhotos = await Promise.all(
-      input.photos.slice(0, 6).map(async (item) => ({
+      input.photos.slice(0, 8).map(async (item) => ({
         role: item.asset.role,
         mimeType: item.asset.mimeType,
         base64Data: await blobToBase64(item.blob),
@@ -63,8 +84,9 @@ export const geminiBackendProvider: MultimodalAnalysisProvider = {
     input.onProgress?.({
       stepIndex: 2,
       totalSteps: 4,
-      label: "Invio al backend protetto OLIVESTIMA",
-      detail: "Chiamata server-side verso Gemini multimodale",
+      label: "Analisi fotografica con Gemini Vision in corso",
+      detail:
+        "Riconoscimento maturazione, difetti, segni di mosca, disidratazione e qualità scatti",
       progressPct: 55,
     });
 
@@ -75,13 +97,14 @@ export const geminiBackendProvider: MultimodalAnalysisProvider = {
         cultivar: input.cultivar,
         sampleWeightGrams: input.sampleWeightGrams,
         lotWeightKg: input.lotWeightKg,
+        oliveCount: input.oliveCount,
         groveLocation: input.groveLocation,
         photos: encodedPhotos,
       }),
     });
 
     if (!response.ok) {
-      let message = "Servizio Gemini backend non disponibile.";
+      let message = "Servizio Gemini Vision non disponibile.";
       try {
         const errPayload = (await response.json()) as { message?: string };
         if (errPayload.message) message = errPayload.message;
@@ -94,66 +117,138 @@ export const geminiBackendProvider: MultimodalAnalysisProvider = {
     input.onProgress?.({
       stepIndex: 3,
       totalSteps: 4,
-      label: "Elaborazione descrittori visivi",
-      detail: "Normalizzazione invaiatura, turgore e rapporto polpa/nocciolo",
-      progressPct: 84,
+      label: "Verifica parametri visivi estratti",
+      detail: "Normalizzazione intervalli e controllo qualità fotografica",
+      progressPct: 86,
     });
 
     const payload = (await response.json()) as {
       provider: string;
-      features: {
-        veraisonIndex: number;
-        greenPct: number;
-        turningPct: number;
-        blackPct: number;
-        turgorScore: number;
-        pulpToPitEstimate: number;
-        defectSeverity: number;
-        leafDebrisPct: number;
-        varietyHint: string;
-        confidence: number;
-        summaryNote: string;
-        recommendedSupplementalRoles?: string[];
-      };
+      features: Record<string, unknown>;
     };
 
-    const raw = payload.features;
+    const raw = payload.features ?? {};
+
+    // Normalize color percentages strictly to sum to 100
+    const gRaw = Math.max(0, Number(raw.greenPct ?? 0));
+    const tRaw = Math.max(0, Number(raw.turningPct ?? 0));
+    const bRaw = Math.max(0, Number(raw.blackPct ?? 0));
+    const sumPct = gRaw + tRaw + bRaw;
+    const greenPct = sumPct > 0 ? Math.round((gRaw / sumPct) * 100) : 40;
+    const turningPct = sumPct > 0 ? Math.round((tRaw / sumPct) * 100) : 35;
+    const blackPct = Math.max(0, 100 - greenPct - turningPct);
+
+    const pulpToPitObservable = Boolean(raw.pulpToPitObservable);
+    const rawPulp = Number(raw.pulpToPitEstimate ?? 0);
+    const pulpToPitEstimate =
+      pulpToPitObservable && rawPulp > 1.5
+        ? Math.round(clamp(rawPulp, 2.2, 7.5) * 10) / 10
+        : null;
+
+    const visibleDefectsPct = clamp(Number(raw.visibleDefectsPct ?? 0), 0, 100);
+    const oliveFlySignsPct = clamp(Number(raw.oliveFlySignsPct ?? 0), 0, 100);
+    const estimatedCountRaw = Number(raw.estimatedVisibleCount ?? 0);
+    const estimatedVisibleCount =
+      Number.isFinite(estimatedCountRaw) && estimatedCountRaw > 0
+        ? Math.round(estimatedCountRaw)
+        : undefined;
+
+    const qualityIssues = Array.isArray(raw.qualityIssues)
+      ? raw.qualityIssues.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+      : [];
+
+    const imageQualitySufficient =
+      raw.imageQualitySufficient !== undefined
+        ? Boolean(raw.imageQualitySufficient)
+        : qualityIssues.length === 0;
+
     const features: VisualMorphologyFeatures = {
-      veraisonIndex: Number(raw.veraisonIndex ?? 2.5),
-      greenPct: Number(raw.greenPct ?? 40),
-      turningPct: Number(raw.turningPct ?? 35),
-      blackPct: Number(raw.blackPct ?? 25),
-      turgorScore: Number(raw.turgorScore ?? 0.72),
-      pulpToPitEstimate: Number(raw.pulpToPitEstimate ?? 4.3),
-      defectSeverity: Number(raw.defectSeverity ?? 0.05),
-      leafDebrisPct: Number(raw.leafDebrisPct ?? 1),
-      varietyHint: raw.varietyHint || `Profilo osservato compatibile con ${input.cultivar}`,
-      confidence: Number(raw.confidence ?? 0.74),
+      veraisonIndex: Math.round(clamp(Number(raw.veraisonIndex ?? 2.5), 0, 5) * 10) / 10,
+      greenPct,
+      turningPct,
+      blackPct,
+      maturationUniformity: normalizeEnum<MaturationUniformity>(
+        raw.maturationUniformity,
+        ["alta", "media", "bassa"],
+        "media"
+      ),
+      apparentAverageSize: normalizeEnum<OliveSizeCategory>(
+        raw.apparentAverageSize,
+        ["piccola", "media", "grande"],
+        "media"
+      ),
+      estimatedVisibleCount,
+      consistency: normalizeEnum<OliveConsistency>(
+        raw.consistency,
+        ["soda", "media", "molle"],
+        "media"
+      ),
+      shrivelingDetected: Boolean(raw.shrivelingDetected),
+      dehydrationLevel: normalizeEnum<DehydrationLevel>(
+        raw.dehydrationLevel,
+        ["assente", "lieve", "moderata", "marcata"],
+        "assente"
+      ),
+      turgorScore: Math.round(clamp(Number(raw.turgorScore ?? 0.72), 0.2, 0.95) * 100) / 100,
+      pulpToPitObservable,
+      pulpToPitEstimate,
+      visibleDefectsPct,
+      oliveFlySignsPct,
+      defectSeverity: Math.round(clamp(Number(raw.defectSeverity ?? 0.05), 0, 1) * 100) / 100,
+      leafDebrisPct: Math.round(clamp(Number(raw.leafDebrisPct ?? 0), 0, 25) * 10) / 10,
+      varietyHint:
+        typeof raw.varietyHint === "string" && raw.varietyHint.trim()
+          ? raw.varietyHint.trim()
+          : `Profilo osservato compatibile con ${input.cultivar}`,
+      confidence: Math.round(clamp(Number(raw.confidence ?? 0.72), 0.3, 0.95) * 100) / 100,
+      imageQualitySufficient,
+      qualityIssues,
       summaryNote:
-        raw.summaryNote || "Analisi visiva completata tramite backend protetto Gemini.",
+        typeof raw.summaryNote === "string" && raw.summaryNote.trim()
+          ? raw.summaryNote.trim()
+          : "Analisi visiva completata tramite Gemini Vision sul backend protetto.",
+      parameterSources: {
+        maturation: "valutazione_visiva",
+        apparentAverageSize: "valutazione_visiva",
+        consistency: "valutazione_visiva",
+        dehydrationLevel: "valutazione_visiva",
+        visibleDefectsPct: "valutazione_visiva",
+        oliveFlySignsPct: "valutazione_visiva",
+        pulpToPitEstimate: pulpToPitObservable
+          ? "valutazione_visiva"
+          : "non_rilevabile",
+        estimatedVisibleCount: estimatedVisibleCount
+          ? "valutazione_visiva"
+          : "non_rilevabile",
+      },
       isSimulated: false,
     };
 
     const existingRoles = new Set(input.photos.map((p) => p.asset.role));
-    const supplementalRequests: SupplementalPhotoRequest[] = (
-      raw.recommendedSupplementalRoles ?? []
-    )
+    const recommendedRaw = Array.isArray(raw.recommendedSupplementalRoles)
+      ? raw.recommendedSupplementalRoles
+      : [];
+
+    const supplementalRequests: SupplementalPhotoRequest[] = recommendedRaw
       .filter((r): r is SamplePhotoRole =>
-        ALLOWED_SUPPLEMENTAL_ROLES.includes(r as SamplePhotoRole)
+        typeof r === "string" && ALLOWED_SUPPLEMENTAL_ROLES.includes(r as SamplePhotoRole)
       )
-      .filter((role) => !existingRoles.has(role))
+      .filter((role) => !existingRoles.has(role) || !imageQualitySufficient)
+      .filter((role, idx, arr) => arr.indexOf(role) === idx)
       .map((role) =>
         buildSupplementalRequest(
           role,
-          "Richiesta suggerita dall'analisi visiva multimodale per ridurre l'incertezza della stima."
+          qualityIssues.length > 0
+            ? qualityIssues[0]
+            : "Scatto suggerito da Gemini Vision per aumentare la precisione della valutazione visiva."
         )
       );
 
     input.onProgress?.({
       stepIndex: 4,
       totalSteps: 4,
-      label: "Analisi completata",
-      detail: "Passaggio al motore statistico di resa",
+      label: "Analisi visiva completata",
+      detail: "Verifica i parametri rilevati prima del calcolo finale",
       progressPct: 100,
     });
 
