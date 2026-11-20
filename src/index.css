@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-forest-950: #0F2319;
+  --color-forest-900: #1B3A2B;
+  --color-forest-800: #234B38;
+  --color-forest-700: #2F6048;
+
+  --color-olive-700: #425E36;
+  --color-olive-600: #557546;
+  --color-olive-500: #6B8D5A;
+  --color-olive-100: #EBF0E6;
+  --color-olive-50: #F4F7F1;
+
+  --color-gold-700: #8A6518;
+  --color-gold-600: #A97D22;
+  --color-gold-500: #C89B3C;
+  --color-gold-200: #EFE0BA;
+  --color-gold-50: #FBF7EC;
+
+  --color-mineral-50: #F7F8F5;
+  --color-mineral-100: #EFF2EC;
+  --color-mineral-200: #DFE5DA;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: var(--color-mineral-50);
+    color: var(--color-forest-950);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, .font-display {
+    font-family: var(--font-display);
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
